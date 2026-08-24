@@ -64,6 +64,8 @@ today_sessions = 0
 
 daily_prompts = { (dt.date.today() - dt.timedelta(days=i)).isoformat(): 0 for i in range(6, -1, -1) }
 today_iso = dt.date.today().isoformat()
+month_ago = (dt.date.today() - dt.timedelta(days=30)).isoformat()
+
 
 model_counts = {}
 today_model_counts = {}
@@ -80,16 +82,21 @@ if os.path.exists(db_path):
         total_prompts += steps
         
         m = get_model_for_conv(conv_id)
-        model_counts[m] = model_counts.get(m, 0) + steps
         
-        if day in daily_prompts:
-            daily_prompts[day] += steps
+        # Ensure the model exists in the dictionary, even if 0
+        if m not in model_counts:
+            model_counts[m] = 0
             
+        if day >= month_ago:
+            model_counts[m] = model_counts.get(m, 0) + steps
+            
+        daily_prompts[day] = daily_prompts.get(day, 0) + steps
+        
+        
         if day == today_iso:
             today_sessions += 1
             today_prompts += steps
             today_model_counts[m] = today_model_counts.get(m, 0) + steps
-            
     conn.close()
 
 # Parse history.jsonl for all dates to catch unflushed data
@@ -131,11 +138,12 @@ for day, h_count in history_daily_prompts.items():
             today_prompts = h_count
             
         # Update model counts for this diff
-        h_models = history_model_counts.get(day, {})
-        for m, c in h_models.items():
-            model_counts[m] = model_counts.get(m, 0) + c  # Rough addition, not exactly diffed per model, but close enough for UI
-            if day == today_iso:
-                today_model_counts[m] = today_model_counts.get(m, 0) + c
+        if day >= month_ago:
+            h_models = history_model_counts.get(day, {})
+            for m, c in h_models.items():
+                model_counts[m] = model_counts.get(m, 0) + c
+                if day == today_iso:
+                    today_model_counts[m] = today_model_counts.get(m, 0) + c
 
 
 with open(cache_path, 'w') as f:
@@ -144,16 +152,20 @@ with open(cache_path, 'w') as f:
 avg_tokens_per_step = 2500
 
 recent_days = []
-for day_str in sorted(daily_prompts.keys()):
+weekly_prompts = 0
+import datetime as dt_temp
+for i in range(6, -1, -1):
+    day = (dt_temp.date.today() - dt_temp.timedelta(days=i)).isoformat()
+    count = daily_prompts.get(day, 0)
+    weekly_prompts += count
     recent_days.append({
-        "date": day_str,
-        "messageCount": daily_prompts[day_str] * avg_tokens_per_step
+        "date": day,
+        "messageCount": count * avg_tokens_per_step
     })
     
-weekly_prompts = sum(daily_prompts.values())
+
 model_usage_dict = {}
 for m, counts in model_counts.items():
-    if counts == 0: continue
     model_usage_dict[m] = {
         "inputTokens": int(counts * avg_tokens_per_step * 0.4),
         "outputTokens": int(counts * avg_tokens_per_step * 0.5),

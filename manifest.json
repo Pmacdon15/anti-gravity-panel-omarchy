@@ -34,7 +34,8 @@
       "syncDir": "",
       "syncFileName": "",
       "syncDeviceId": ""
-    }
+    },
+    "defaultSection": "right"
   },
   "omarchy": {
     "clonedFrom": "omarchy.agents"

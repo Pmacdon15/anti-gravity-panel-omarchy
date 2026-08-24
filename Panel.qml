@@ -660,7 +660,7 @@ Panel {
 
             PanelSectionHeader {
               width: parent.width
-              text: "TOKENS BY MODEL"
+              text: "30-DAY TOKENS BY MODEL"
               foreground: root.foreground
               fontFamily: root.fontFamily
             }
