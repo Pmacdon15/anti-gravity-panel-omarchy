@@ -7,8 +7,8 @@ import qs.Ui
 
 Panel {
   id: root
-  moduleName: "omarchy.agents"
-  ipcTarget: "omarchy.agents"
+  moduleName: "pmacd.antigravity"
+  ipcTarget: "pmacd.antigravity"
   manageIpc: false
 
   readonly property color foreground: bar ? bar.foreground : Color.foreground
@@ -248,7 +248,7 @@ Panel {
       })
     }
     rows.sort(function(a, b) { return b.total - a.total })
-    return rows.slice(0, 4)
+    return rows
   }
 
   function modelTooltip(row) {
@@ -397,7 +397,7 @@ Panel {
           // ---------- Hero: provider mark · name · plan ----------
           PanelHero {
             id: hero
-            visible: !!root.provider
+            visible: false
             width: parent.width
             title: root.provider ? root.provider.providerName : ""
             meta: root.heroMeta(root.provider)
@@ -509,7 +509,7 @@ Panel {
               anchors.verticalCenter: parent.verticalCenter
               anchors.leftMargin: Style.space(12)
               anchors.rightMargin: Style.space(12)
-              text: root.provider ? String(root.provider.authHelpText || "") : ""
+              text: root.provider ? (root.provider.providerName + " — " + root.provider.usageStatusText) : ""
               color: root.dim
               font.family: root.fontFamily
               font.pixelSize: Style.font.caption
