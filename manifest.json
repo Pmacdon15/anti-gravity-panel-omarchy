@@ -1,11 +1,11 @@
 {
   "schemaVersion": 1,
-  "id": "pmacd.antigravity",
-  "name": "Antigravity",
+  "id": "pmacd.anti-gravity-panel",
+  "name": "Anti-Gravity Panel",
   "version": "1.0.0",
-  "author": "Omarchy",
+  "author": "pmacd",
   "license": "MIT",
-  "description": "Claude Code, Codex, and Fireworks usage, limits, and pace in a native Omarchy bar panel.",
+  "description": "Live Google Antigravity Agent token usage, dynamic model breakdown, and sliding window limit meters in a native Omarchy bar panel.",
   "kinds": [
     "bar-widget"
   ],
@@ -14,12 +14,13 @@
     "barWidget": "Panel.qml"
   },
   "barWidget": {
-    "displayName": "My Agents",
-    "description": "One bar icon and one panel: rate-limit meters with pace, today, the last week, and the all-time model breakdown for every subscription.",
+    "displayName": "Anti-Gravity Panel",
+    "description": "One bar icon and one panel: real-time rate-limit meters, today's prompt stats, and an all-time multi-model usage breakdown specifically for Google Antigravity.",
     "category": "AI",
     "aliases": [
       "agents",
-      "model-usage"
+      "model-usage",
+      "antigravity"
     ],
     "allowMultiple": false,
     "defaults": {
@@ -33,50 +34,7 @@
       "syncDir": "",
       "syncFileName": "",
       "syncDeviceId": ""
-    },
-    "schema": [
-      {
-        "key": "refreshIntervalSec",
-        "type": "integer",
-        "label": "Refresh interval (seconds)",
-        "min": 30,
-        "max": 3600,
-        "step": 30,
-        "defaultValue": 900
-      },
-      {
-        "key": "syncMode",
-        "type": "enum",
-        "label": "Synced aggregation",
-        "options": [
-          "Off",
-          "On"
-        ],
-        "defaultValue": "Off",
-        "description": "When On, write this machine's local usage snapshot and merge snapshots from other machines."
-      },
-      {
-        "key": "syncDir",
-        "type": "path",
-        "label": "Sync folder",
-        "defaultValue": "",
-        "description": "A folder synced by Syncthing, Dropbox, rsync, etc."
-      },
-      {
-        "key": "syncFileName",
-        "type": "string",
-        "label": "Snapshot file name",
-        "defaultValue": "",
-        "description": "Optional. Defaults to <hostname>.json. Use a different file name on each machine, such as laptop.json or desktop.json."
-      },
-      {
-        "key": "syncDeviceId",
-        "type": "string",
-        "label": "Device id",
-        "defaultValue": "",
-        "description": "Optional stable device name used inside synced aggregate snapshots."
-      }
-    ]
+    }
   },
   "omarchy": {
     "clonedFrom": "omarchy.agents"

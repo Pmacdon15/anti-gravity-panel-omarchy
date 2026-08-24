@@ -7,8 +7,8 @@ import qs.Ui
 
 Panel {
   id: root
-  moduleName: "pmacd.antigravity"
-  ipcTarget: "pmacd.antigravity"
+  moduleName: "pmacd.anti-gravity-panel"
+  ipcTarget: "pmacd.anti-gravity-panel"
   manageIpc: false
 
   readonly property color foreground: bar ? bar.foreground : Color.foreground

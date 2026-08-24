@@ -21,6 +21,14 @@ Item {
   property var agents: []
   property int dataRevision: 0
 
+
+  Process {
+    id: liveUpdateProcess
+    command: ["/bin/bash", "-c", "while inotifywait -q -e close_write ~/.gemini/antigravity-cli/history.jsonl; do python3 " + Qt.resolvedUrl(".").toString().replace("file://", "") + "collect-antigravity.py; done"]
+    running: true
+    onRunningChanged: if (!running) running = true
+  }
+
   Process {
     id: listProcess
     running: false
@@ -144,7 +152,7 @@ Item {
   }
 
   function updateCommand(kind, agentIds) {
-    var command = ["/home/pmacd/Projects/antigravity-panel/update-antigravity.sh"]
+    var scriptDir = Qt.resolvedUrl(".").toString().replace("file://", ""); var command = ["/bin/bash", "-c", "python3 " + scriptDir + "collect-antigravity.py"]
     if (kind === "force") command.push("--force")
     if (kind === "limits") command.push("--limits-only")
     var providers = settings && settings.providers ? settings.providers : {}
