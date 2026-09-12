@@ -1,8 +1,8 @@
-# Anti-Gravity Panel for Omarchy
+# anti-gravity-panel-omarchy
 
 A lightweight, real-time Omarchy shell plugin that acts as a "super control" dashboard for the Google Antigravity Agent ecosystem.
 
-![Antigravity Panel](pannel.png)
+![Anti-Gravity Panel](panel.png)
 
 ## Features
 
@@ -21,27 +21,27 @@ The plugin's QML frontend embeds an `inotifywait` loop directly via a `Process` 
 You can install this plugin directly from GitHub using the Omarchy CLI:
 
 ```bash
-omarchy plugin add https://github.com/Pmacdon15/anti-gravity-pannel-omarchy.git --enable
+omarchy plugin add https://github.com/Pmacdon15/anti-gravity-panel-omarchy.git --enable
 ```
 
 Once installed, you can bind it to a key combination (like `SUPER + 7`) in your `~/.config/hypr/bindings.lua`:
 ```lua
-o.bind("SUPER + 7", "Antigravity", "omarchy-shell toggle omarchy.anti-gravity-panel")
+o.bind("SUPER + 7", "Antigravity", "omarchy-shell anti-gravity-panel-omarchy toggle")
 ```
 
 ## Management Commands
 
 **Update the plugin:**
 ```bash
-omarchy plugin update omarchy.anti-gravity-panel
+omarchy plugin update anti-gravity-panel-omarchy
 ```
 
 **Disable the plugin (keeps files):**
 ```bash
-omarchy plugin disable omarchy.anti-gravity-panel
+omarchy plugin disable anti-gravity-panel-omarchy
 ```
 
 **Uninstall the plugin entirely:**
 ```bash
-omarchy plugin remove omarchy.anti-gravity-panel
+omarchy plugin remove anti-gravity-panel-omarchy
 ```
