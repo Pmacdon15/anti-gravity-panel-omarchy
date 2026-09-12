@@ -36,15 +36,13 @@ Panel {
   // panel keeps telling the truth while it sits open.
   property double nowMs: Date.now()
 
-  readonly property var limits: limitWindows(provider)
   readonly property var models: modelRows(provider)
-  readonly property var headline: bindingWindow(provider)
   readonly property var balance: provider ? (provider.balance || null) : null
   // A prepaid account runs low the way a subscription window fills up: the
   // last 10% of the funded credits lights the same alarm.
   readonly property bool balanceAlarming: !!balance && balance.funded > 0
     && balance.remaining / balance.funded <= 0.1
-  readonly property bool alarming: (!!headline && headline.percent >= 0.9) || balanceAlarming
+  readonly property bool alarming: balanceAlarming
 
   function clamp(v, lo, hi) { return Math.max(lo, Math.min(hi, v)) }
   function alpha(c, a) { return Qt.rgba(c.r, c.g, c.b, a) }
@@ -64,89 +62,6 @@ Panel {
     root.close()
   }
 
-  // ---------------------------------------------------------------- limits
-  //
-  // Both providers report the same two shapes: a short rolling session window
-  // and a long weekly one. Everything below normalizes them into one record so
-  // the meters and the hero speak a single language.
-
-  // Claude spells its windows out ("Session (5-hour)"), Codex abbreviates
-  // them ("5h window", "30m window"). Both have to land on the same record.
-  function windowIsLong(text) {
-    return text.indexOf("week") >= 0 || text.indexOf("7-day") >= 0 || text.indexOf("seven") >= 0
-      || text.indexOf("month") >= 0 || text.indexOf("30-day") >= 0
-  }
-
-  function windowSpanMs(label) {
-    var text = String(label || "").toLowerCase()
-    if (text.indexOf("month") >= 0 || text.indexOf("30-day") >= 0) return 30 * 24 * 3600 * 1000
-    if (windowIsLong(text)) return 7 * 24 * 3600 * 1000
-    var hours = text.match(/(\d+)\s*-?\s*h(?:our)?\b/)
-    if (hours) return Number(hours[1]) * 3600 * 1000
-    var minutes = text.match(/(\d+)\s*-?\s*m(?:in(?:ute)?s?)?\b/)
-    if (minutes) return Number(minutes[1]) * 60 * 1000
-    return 0
-  }
-
-  function windowTitle(label) {
-    var text = String(label || "").toLowerCase()
-    if (text.indexOf("month") >= 0) return "Monthly"
-    if (windowIsLong(text)) return "Weekly"
-    if (text.indexOf("session") >= 0 || windowSpanMs(label) > 0) return "Session"
-    var plain = String(label || "").replace(/\s*\(.*\)\s*/, "").trim()
-    return plain === "" ? "Limit" : plain
-  }
-
-  // A collector that already knows which window a limit belongs to says so,
-  // and that beats reading it back out of the label: a model-scoped limit is
-  // titled after its model, and a name like "Opus 5 (1M context)" would parse
-  // as a one-minute window.
-  function limitWindow(label, percent, resetAt, title) {
-    return {
-      title: String(title || "") !== "" ? String(title) : windowTitle(label),
-      percent: Number(percent),
-      resetAt: String(resetAt || "")
-    }
-  }
-
-  function limitWindows(p) {
-    if (!p) return []
-    var out = []
-    var list = p.limits || []
-    for (var i = 0; i < list.length; i++) {
-      var entry = list[i] || {}
-      var percent = Number(entry.percent)
-      if (percent >= 0) out.push(limitWindow(entry.label, percent, entry.resetsAt, entry.title))
-    }
-    return out
-  }
-
-  // The window that decides how much room is left — the fullest one, since
-  // that is what stops the next prompt.
-  function bindingWindow(p) {
-    var windows = limitWindows(p)
-    var best = null
-    for (var i = 0; i < windows.length; i++) {
-      if (!best || windows[i].percent > best.percent) best = windows[i]
-    }
-    return best
-  }
-
-  function resetMsFor(w) {
-    if (!w || w.resetAt === "") return -1
-    var ms = new Date(w.resetAt).getTime()
-    return isFinite(ms) ? ms - root.nowMs : -1
-  }
-
-  function formatDuration(ms) {
-    if (!(ms > 0)) return "now"
-    var minutes = Math.floor(ms / 60000)
-    var hours = Math.floor(minutes / 60)
-    var days = Math.floor(hours / 24)
-    if (days > 0) return days + "d " + (hours % 24) + "h"
-    if (hours > 0) return hours + "h " + (minutes % 60) + "m"
-    return Math.max(1, minutes) + "m"
-  }
 
   // ---------------------------------------------------------------- balance
   //
@@ -517,9 +432,9 @@ Panel {
             }
           }
 
-          // ---------- Balance / limits ----------
+          // ---------- Balance ----------
           PanelSeparator {
-            visible: balanceSection.visible || limitsSection.visible
+            visible: balanceSection.visible
             foreground: root.foreground
           }
 
@@ -581,29 +496,6 @@ Panel {
               color: root.dim
               font.family: root.fontFamily
               font.pixelSize: Style.font.caption
-            }
-          }
-
-          Column {
-            id: limitsSection
-            visible: root.limits.length > 0
-            width: parent.width
-            spacing: Style.space(10)
-
-            PanelSectionHeader {
-              text: "LIMITS"
-              foreground: root.foreground
-              fontFamily: root.fontFamily
-            }
-
-            Repeater {
-              model: root.limits
-
-              LimitRow {
-                required property var modelData
-                width: limitsSection.width
-                window: modelData
-              }
             }
           }
 
@@ -695,65 +587,6 @@ Panel {
     }
   }
 
-  // A limit window: label and percentage, meter, and reset countdown.
-  component LimitRow: Column {
-    id: limitRow
-    property var window: null
-
-    readonly property bool alarming: window && window.percent >= 0.9
-
-    spacing: Style.space(6)
-
-    Item {
-      width: parent.width
-      implicitHeight: Math.max(limitLabel.implicitHeight, limitValue.implicitHeight)
-
-      Text {
-        id: limitLabel
-        // A model-scoped window is titled after its model, and those names run
-        // long enough to reach the percentage, so the title gives way first.
-        text: limitRow.window ? limitRow.window.title : ""
-        color: root.foreground
-        font.family: root.fontFamily
-        font.pixelSize: Style.font.body
-        elide: Text.ElideRight
-        anchors.left: parent.left
-        anchors.right: limitValue.left
-        anchors.rightMargin: Style.spacing.sm
-        anchors.verticalCenter: parent.verticalCenter
-      }
-
-      Text {
-        id: limitValue
-        text: limitRow.window && limitRow.window.percent >= 0
-          ? Math.round(limitRow.window.percent * 100) + "%"
-          : "—"
-        color: limitRow.alarming ? root.urgent : root.foreground
-        font.family: root.fontFamily
-        font.pixelSize: Style.font.caption
-        anchors.right: parent.right
-        anchors.verticalCenter: parent.verticalCenter
-      }
-    }
-
-    Meter {
-      width: parent.width
-      value: limitRow.window ? limitRow.window.percent : -1
-      alarming: limitRow.alarming
-    }
-
-    Text {
-      id: resetText
-      width: parent.width
-      text: {
-        var remainingMs = root.resetMsFor(limitRow.window)
-        return remainingMs > 0 ? "Resets in " + root.formatDuration(remainingMs) : ""
-      }
-      color: root.dim
-      font.family: root.fontFamily
-      font.pixelSize: Style.font.caption
-    }
-  }
 
   // Rounded track showing the percentage of the allowance used.
   component Meter: Item {

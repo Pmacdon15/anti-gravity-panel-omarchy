@@ -8,7 +8,6 @@ A lightweight, real-time Omarchy shell plugin that acts as a "super control" das
 
 - **Live Data Rendering**: Automatically updates the instant you interact with Antigravity, hooking directly into the `history.jsonl` stream via an embedded native QML Process.
 - **Advanced Model Breakdown**: Dynamically parses both your `settings.json` and local conversation databases to accurately distribute your token usage across all the distinct models you switch between (e.g., Gemini Pro, Gemini Flash, Claude Sonnet).
-- **Quota Windows**: Implements sliding window quotas (4-hour, 12-hour, Daily, and Weekly limits) giving you an at-a-glance view of your token velocity.
 - **Uncapped UI Height**: Specifically designed as a dashboard that stretches to fit all models without needing to scroll.
 
 ## How it works
