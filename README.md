@@ -26,22 +26,22 @@ omarchy plugin add https://github.com/Pmacdon15/anti-gravity-pannel-omarchy.git 
 
 Once installed, you can bind it to a key combination (like `SUPER + 7`) in your `~/.config/hypr/bindings.lua`:
 ```lua
-o.bind("SUPER + 7", "Antigravity", "omarchy-shell toggle pmacd.anti-gravity-panel")
+o.bind("SUPER + 7", "Antigravity", "omarchy-shell toggle omarchy.anti-gravity-panel")
 ```
 
 ## Management Commands
 
 **Update the plugin:**
 ```bash
-omarchy plugin update pmacd.anti-gravity-panel
+omarchy plugin update omarchy.anti-gravity-panel
 ```
 
 **Disable the plugin (keeps files):**
 ```bash
-omarchy plugin disable pmacd.anti-gravity-panel
+omarchy plugin disable omarchy.anti-gravity-panel
 ```
 
 **Uninstall the plugin entirely:**
 ```bash
-omarchy plugin remove pmacd.anti-gravity-panel
+omarchy plugin remove omarchy.anti-gravity-panel
 ```
