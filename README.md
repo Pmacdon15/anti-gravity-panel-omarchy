@@ -2,7 +2,7 @@
 
 A lightweight, real-time Omarchy shell plugin that acts as a "super control" dashboard for the Google Antigravity Agent ecosystem.
 
-![Anti-Gravity Panel](panel.png)
+![Anti-Gravity Panel](preview.png)
 
 ## Features
 
