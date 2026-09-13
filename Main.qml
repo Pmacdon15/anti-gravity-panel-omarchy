@@ -13,7 +13,31 @@ Item {
   property var settings: ({})
 
   readonly property string home: Quickshell.env("HOME") || ""
-  readonly property string usageDir: (Quickshell.env("XDG_STATE_HOME") || home + "/.local/state") + "/omarchy/agents/usage"
+  readonly property string stateHome: Quickshell.env("XDG_STATE_HOME") || (home + "/.local/state")
+  readonly property string cacheHome: Quickshell.env("XDG_CACHE_HOME") || (home + "/.cache")
+  readonly property string usageDir: stateHome + "/omarchy/agents/usage"
+
+  // Verified absolute tools
+  readonly property string pythonBin: "/usr/bin/python3"
+  readonly property string inotifyBin: "/usr/bin/inotifywait"
+  readonly property string findBin: "/usr/bin/find"
+
+  readonly property string pluginDir: {
+    var url = Qt.resolvedUrl(".").toString()
+    if (url.indexOf("file://") === 0) url = url.substring(7)
+    if (url.length > 0 && url.charAt(url.length - 1) !== "/") url += "/"
+    return url
+  }
+  readonly property string collectorScriptPath: pluginDir + "collect-antigravity.py"
+  readonly property string historyWatchDir: home + "/.gemini/antigravity-cli"
+
+  readonly property var closedEnv: ({
+    "PATH": "/usr/bin:/bin",
+    "HOME": root.home,
+    "XDG_STATE_HOME": root.stateHome,
+    "XDG_CACHE_HOME": root.cacheHome,
+    "LANG": "en_US.UTF-8"
+  })
 
   // ------------------------------------------------------------- discovery
 
@@ -21,22 +45,120 @@ Item {
   property var agents: []
   property int dataRevision: 0
 
+  // Bounded collector for discovery output
+  property var discoveredAgentLines: []
+  property int discoveredAgentBytes: 0
+  readonly property int maxAgentListLines: 64
+  readonly property int maxAgentListBytes: 16384
 
   Process {
-    id: liveUpdateProcess
-    command: ["/bin/bash", "-c", "while inotifywait -q -e close_write ~/.gemini/antigravity-cli/history.jsonl; do python3 " + Qt.resolvedUrl(".").toString().replace("file://", "") + "collect-antigravity.py; done"]
+    id: liveWatcherProcess
+    command: [
+      root.inotifyBin,
+      "-m",
+      "-q",
+      "-e",
+      "close_write",
+      "--format",
+      "%f",
+      root.historyWatchDir
+    ]
+    clearEnvironment: true
+    environment: ({ "PATH": "/usr/bin:/bin" })
     running: true
-    onRunningChanged: if (!running) running = true
+
+    stdout: SplitParser {
+      splitMarker: "\n"
+      onRead: function(line) {
+        var filename = String(line || "").trim()
+        if (filename === "history.jsonl") {
+          root.scheduleLiveUpdate()
+        }
+      }
+    }
+
+    onExited: function(exitCode) {
+      liveWatcherRestartTimer.restart()
+    }
+  }
+
+  Timer {
+    id: liveWatcherRestartTimer
+    interval: 5000
+    repeat: false
+    onTriggered: {
+      if (!liveWatcherProcess.running) liveWatcherProcess.running = true
+    }
+  }
+
+  Timer {
+    id: liveUpdateDebounce
+    interval: 500
+    repeat: false
+    onTriggered: root.runUpdate("normal")
+  }
+
+  function scheduleLiveUpdate() {
+    liveUpdateDebounce.restart()
   }
 
   Process {
     id: listProcess
     running: false
-    command: ["echo", "antigravity.json"]
+    command: [root.findBin, root.usageDir, "-maxdepth", "1", "-type", "f", "-name", "*.json", "-printf", "%f\n"]
+    clearEnvironment: true
+    environment: ({ "PATH": "/usr/bin:/bin" })
 
-    stdout: StdioCollector {
-      waitForEnd: true
-      onStreamFinished: root.applyAgentListing(text)
+    stdout: SplitParser {
+      splitMarker: "\n"
+      onRead: function(line) {
+        var raw = String(line || "").trim()
+        if (raw.length === 0) return
+        if (root.discoveredAgentLines.length >= root.maxAgentListLines) return
+        root.discoveredAgentBytes += raw.length
+        if (root.discoveredAgentBytes > root.maxAgentListBytes) return
+        if (/^[A-Za-z0-9._-]+\.json$/.test(raw)) {
+          root.discoveredAgentLines.push(raw)
+        }
+      }
+    }
+
+    onStarted: {
+      root.discoveredAgentLines = []
+      root.discoveredAgentBytes = 0
+      listDeadlineTimer.restart()
+    }
+
+    onExited: function(exitCode) {
+      listDeadlineTimer.stop()
+      listKillTimer.stop()
+      root.applyDiscoveredAgents()
+    }
+  }
+
+  Timer {
+    id: listDeadlineTimer
+    interval: 5000
+    repeat: false
+    onTriggered: {
+      if (listProcess.running) {
+        console.warn("agents", "listProcess timed out, sending SIGTERM")
+        listProcess.signal(15)
+        listKillTimer.restart()
+      }
+    }
+  }
+
+  Timer {
+    id: listKillTimer
+    interval: 1500
+    repeat: false
+    onTriggered: {
+      if (listProcess.running) {
+        console.warn("agents", "listProcess did not terminate after SIGTERM, sending SIGKILL")
+        listProcess.signal(9)
+        listProcess.running = false
+      }
     }
   }
 
@@ -44,16 +166,13 @@ Item {
     if (!listProcess.running) listProcess.running = true
   }
 
-  function applyAgentListing(output) {
+  function applyDiscoveredAgents() {
     var ids = []
-    var lines = String(output || "").split("\n")
-    for (var i = 0; i < lines.length; i++) {
-      var name = lines[i].trim()
+    for (var i = 0; i < root.discoveredAgentLines.length; i++) {
+      var name = root.discoveredAgentLines[i]
       if (name.slice(-5) === ".json") ids.push(name.slice(0, -5))
     }
     ids.sort()
-    // Same list, same objects: reassigning the model would tear down every
-    // FileView just to build identical ones.
     if (JSON.stringify(ids) !== JSON.stringify(agentIds)) agentIds = ids
   }
 
@@ -120,6 +239,29 @@ Item {
     if (syncConfigured()) scheduleSync()
   }
 
+  Component.onDestruction: {
+    if (liveWatcherProcess.running) {
+      liveWatcherProcess.signal(15)
+      liveWatcherProcess.running = false
+    }
+    if (listProcess.running) {
+      listProcess.signal(15)
+      listProcess.running = false
+    }
+    if (updateProcess.running) {
+      updateProcess.signal(15)
+      updateProcess.running = false
+    }
+    if (syncWriteProcess.running) {
+      syncWriteProcess.signal(15)
+      syncWriteProcess.running = false
+    }
+    if (syncScanProcess.running) {
+      syncScanProcess.signal(15)
+      syncScanProcess.running = false
+    }
+  }
+
   // -------------------------------------------------------------- refresh
 
   property int refreshIntervalSec: Math.max(30, Number(setting("refreshIntervalSec", 900)))
@@ -133,10 +275,39 @@ Item {
     onTriggered: root.runUpdate("normal")
   }
 
+  property int updateStderrLines: 0
+  property int updateStderrBytes: 0
+  readonly property int maxStderrLines: 50
+  readonly property int maxStderrBytes: 16384
+
   Process {
     id: updateProcess
     running: false
-    onExited: {
+    clearEnvironment: true
+    environment: root.closedEnv
+
+    stderr: SplitParser {
+      splitMarker: "\n"
+      onRead: function(line) {
+        var raw = String(line || "").trim()
+        if (raw.length === 0) return
+        if (root.updateStderrLines >= root.maxStderrLines) return
+        root.updateStderrBytes += raw.length
+        if (root.updateStderrBytes > root.maxStderrBytes) return
+        root.updateStderrLines++
+        console.warn("agents", raw)
+      }
+    }
+
+    onStarted: {
+      root.updateStderrLines = 0
+      root.updateStderrBytes = 0
+      updateTermTimer.restart()
+    }
+
+    onExited: function(exitCode) {
+      updateTermTimer.stop()
+      updateKillTimer.stop()
       root.rescanAgents()
       if (root.pendingUpdateKind !== "") {
         var kind = root.pendingUpdateKind
@@ -144,23 +315,53 @@ Item {
         root.runUpdate(kind)
       }
     }
+  }
 
-    stderr: StdioCollector {
-      waitForEnd: true
-      onStreamFinished: if (text.trim() !== "") console.warn("agents", text.trim())
+  Timer {
+    id: updateTermTimer
+    interval: 15000
+    repeat: false
+    onTriggered: {
+      if (updateProcess.running) {
+        console.warn("agents", "updateProcess exceeded deadline, sending SIGTERM")
+        updateProcess.signal(15)
+        updateKillTimer.restart()
+      }
+    }
+  }
+
+  Timer {
+    id: updateKillTimer
+    interval: 2000
+    repeat: false
+    onTriggered: {
+      if (updateProcess.running) {
+        console.warn("agents", "updateProcess did not exit after SIGTERM, sending SIGKILL")
+        updateProcess.signal(9)
+        updateProcess.running = false
+      }
     }
   }
 
   function updateCommand(kind, agentIds) {
-    var scriptDir = Qt.resolvedUrl(".").toString().replace("file://", ""); var command = ["/bin/bash", "-c", "python3 " + scriptDir + "collect-antigravity.py"]
+    var command = [root.pythonBin, root.collectorScriptPath]
     if (kind === "force") command.push("--force")
     if (kind === "limits") command.push("--limits-only")
     var providers = settings && settings.providers ? settings.providers : {}
     for (var id in providers) {
-      if (providers[id] && providers[id].enabled === false) command.push("--except", id)
+      if (providers[id] && providers[id].enabled === false) {
+        if (/^[A-Za-z0-9._-]+$/.test(id)) {
+          command.push("--except", id)
+        }
+      }
     }
     if (agentIds) {
-      for (var i = 0; i < agentIds.length; i++) command.push(agentIds[i])
+      for (var i = 0; i < agentIds.length; i++) {
+        var safeId = String(agentIds[i] || "").trim()
+        if (/^[A-Za-z0-9._-]+$/.test(safeId)) {
+          command.push(safeId)
+        }
+      }
     }
     return command
   }
@@ -299,7 +500,7 @@ Item {
   readonly property string syncEffectiveDir: expandPath(syncDir)
   readonly property string syncEffectiveFileName: safeSnapshotFileName(syncFileName, syncDeviceId)
   readonly property string syncEffectiveDeviceId: safeDeviceId(syncDeviceId || syncEffectiveFileName.replace(/\.json$/i, ""))
-  readonly property string syncSnapshotPath: syncConfigured() ? syncEffectiveDir + "/" + syncEffectiveFileName : home + "/.cache/omarchy/agents-disabled.json"
+  readonly property string syncSnapshotPath: syncConfigured() ? syncEffectiveDir + "/" + syncEffectiveFileName : ""
   property var aggregateData: ({})
   property int syncRevision: 0
   property bool syncRunning: false
@@ -319,46 +520,153 @@ Item {
     onTriggered: root.runSync()
   }
 
+  property string pendingSyncPayload: ""
+  readonly property int maxSyncSnapshots: 20
+  readonly property int maxSyncSnapshotBytes: 262144
+
   Process {
-    id: syncMkdirProcess
+    id: syncWriteProcess
     running: false
+    stdinEnabled: true
+    clearEnvironment: true
+    environment: root.closedEnv
     onRunningChanged: root.updateSyncRunning()
+
+    onStarted: {
+      syncWriteTermTimer.restart()
+      if (root.pendingSyncPayload !== "") {
+        syncWriteProcess.write(root.pendingSyncPayload)
+        root.pendingSyncPayload = ""
+      }
+    }
+
+    stderr: SplitParser {
+      splitMarker: "\n"
+      onRead: function(line) {
+        var text = String(line || "").trim()
+        if (text !== "") console.warn("agents/sync-write", text)
+      }
+    }
+
     onExited: function(exitCode) {
+      syncWriteTermTimer.stop()
+      syncWriteKillTimer.stop()
       if (exitCode !== 0) {
-        if (root.syncConfigured()) root.syncStatusText = "Usage sync mkdir failed"
+        if (root.syncConfigured()) root.syncStatusText = "Usage sync write failed"
         root.finishSyncRun()
         return
       }
-      root.writeSyncSnapshot()
+      Qt.callLater(root.startSyncScan)
     }
   }
+
+  Timer {
+    id: syncWriteTermTimer
+    interval: 5000
+    repeat: false
+    onTriggered: {
+      if (syncWriteProcess.running) {
+        console.warn("agents/sync-write", "syncWriteProcess deadline exceeded, sending SIGTERM")
+        syncWriteProcess.signal(15)
+        syncWriteKillTimer.restart()
+      }
+    }
+  }
+
+  Timer {
+    id: syncWriteKillTimer
+    interval: 1500
+    repeat: false
+    onTriggered: {
+      if (syncWriteProcess.running) {
+        console.warn("agents/sync-write", "syncWriteProcess did not exit, sending SIGKILL")
+        syncWriteProcess.signal(9)
+        syncWriteProcess.running = false
+      }
+    }
+  }
+
+  property var syncAccumulatedSnapshots: []
+  property int syncScanBytes: 0
 
   Process {
     id: syncScanProcess
     running: false
+    clearEnvironment: true
+    environment: root.closedEnv
     onRunningChanged: root.updateSyncRunning()
+
+    stdout: SplitParser {
+      splitMarker: "\n"
+      onRead: function(line) {
+        var raw = String(line || "").trim()
+        if (raw.length === 0) return
+        if (root.syncAccumulatedSnapshots.length >= root.maxSyncSnapshots) return
+        root.syncScanBytes += raw.length
+        if (root.syncScanBytes > root.maxSyncSnapshotBytes * root.maxSyncSnapshots) return
+        try {
+          var parsed = JSON.parse(raw)
+          if (parsed && typeof parsed === "object" && parsed.providers) {
+            root.syncAccumulatedSnapshots.push(parsed)
+          }
+        } catch (e) {
+          console.warn("agents/sync", "Ignoring invalid sync snapshot JSON line", e)
+        }
+      }
+    }
+
+    stderr: SplitParser {
+      splitMarker: "\n"
+      onRead: function(line) {
+        var text = String(line || "").trim()
+        if (text !== "") console.warn("agents/sync", text)
+      }
+    }
+
+    onStarted: {
+      root.syncAccumulatedSnapshots = []
+      root.syncScanBytes = 0
+      syncScanTermTimer.restart()
+    }
+
     onExited: function(exitCode) {
-      if (exitCode !== 0 && root.syncConfigured()) root.syncStatusText = "Usage sync scan failed"
+      syncScanTermTimer.stop()
+      syncScanKillTimer.stop()
+      if (exitCode !== 0 && root.syncConfigured()) {
+        root.syncStatusText = "Usage sync scan failed"
+      } else {
+        root.aggregateData = root.aggregateSnapshots(root.syncAccumulatedSnapshots)
+        root.syncStatusText = ""
+        root.syncRevision++
+      }
       root.finishSyncRun()
-    }
-
-    stdout: StdioCollector {
-      waitForEnd: true
-      onStreamFinished: root.parseSyncScanOutput(text)
-    }
-
-    stderr: StdioCollector {
-      waitForEnd: true
-      onStreamFinished: if (text.trim() !== "") console.warn("agents/sync", text.trim())
     }
   }
 
-  FileView {
-    id: syncSnapshotFile
-    path: root.syncSnapshotPath
-    watchChanges: false
-    atomicWrites: true
-    printErrors: false
+  Timer {
+    id: syncScanTermTimer
+    interval: 10000
+    repeat: false
+    onTriggered: {
+      if (syncScanProcess.running) {
+        console.warn("agents/sync", "syncScanProcess deadline exceeded, sending SIGTERM")
+        syncScanProcess.signal(15)
+        syncScanKillTimer.restart()
+      }
+    }
+  }
+
+  Timer {
+    id: syncScanKillTimer
+    interval: 2000
+    repeat: false
+    onTriggered: {
+      if (syncScanProcess.running) {
+        console.warn("agents/sync", "syncScanProcess did not exit, sending SIGKILL")
+        syncScanProcess.signal(9)
+        syncScanProcess.running = false
+      }
+    }
   }
 
   FileView {
@@ -366,7 +674,10 @@ Item {
     path: "/etc/hostname"
     watchChanges: false
     printErrors: false
-    onLoaded: root.detectedHostname = String(text() || "").trim()
+    onLoaded: {
+      var raw = String(text() || "").trim().slice(0, 80)
+      root.detectedHostname = raw
+    }
   }
 
   function parseSyncEnabled(value) {
@@ -392,12 +703,24 @@ Item {
   }
 
   function updateSyncRunning() {
-    root.syncRunning = syncMkdirProcess.running || syncScanProcess.running
+    root.syncRunning = syncWriteProcess.running || syncScanProcess.running
   }
 
   function scheduleSync() {
     if (!syncConfigured()) return
     syncDebounce.restart()
+  }
+
+  function validateSyncDir(dir) {
+    var s = String(dir || "").trim()
+    if (s === "" || s === "/" || s.indexOf("..") !== -1 || s.charAt(0) !== "/") return false
+    return true
+  }
+
+  function validateSyncPath(path) {
+    var s = String(path || "").trim()
+    if (!validateSyncDir(s)) return false
+    return /^[A-Za-z0-9_./-]+\.json$/.test(s)
   }
 
   function runSync() {
@@ -409,8 +732,7 @@ Item {
 
     syncRequestedWhileRunning = false
     syncStatusText = ""
-    syncMkdirProcess.command = ["mkdir", "-p", root.syncEffectiveDir]
-    syncMkdirProcess.running = true
+    writeSyncSnapshot()
   }
 
   function writeSyncSnapshot() {
@@ -418,8 +740,20 @@ Item {
       finishSyncRun()
       return
     }
-    syncSnapshotFile.setText(JSON.stringify(localSnapshot(), null, 2) + "\n")
-    Qt.callLater(root.startSyncScan)
+    if (!validateSyncPath(root.syncSnapshotPath)) {
+      console.warn("agents/sync", "Refusing to write to invalid sync path:", root.syncSnapshotPath)
+      finishSyncRun()
+      return
+    }
+    var payload = JSON.stringify(localSnapshot(), null, 2) + "\n"
+    if (payload.length > root.maxSyncSnapshotBytes) {
+      console.warn("agents/sync", "Snapshot payload exceeds max byte limit")
+      finishSyncRun()
+      return
+    }
+    root.pendingSyncPayload = payload
+    syncWriteProcess.command = [root.pythonBin, root.collectorScriptPath, "--sync-write", root.syncSnapshotPath]
+    syncWriteProcess.running = true
   }
 
   function startSyncScan() {
@@ -427,8 +761,12 @@ Item {
       finishSyncRun()
       return
     }
-    var script = "dir=$0; [[ -d \"$dir\" ]] || exit 0; shopt -s nullglob; for f in \"$dir\"/*.json; do [[ -f \"$f\" ]] || continue; printf '===%s===\\n' \"$f\"; cat \"$f\"; printf '\\n=== EOM ===\\n'; done"
-    syncScanProcess.command = ["bash", "-c", script, root.syncEffectiveDir]
+    if (!validateSyncDir(root.syncEffectiveDir)) {
+      console.warn("agents/sync", "Refusing to scan invalid sync directory:", root.syncEffectiveDir)
+      finishSyncRun()
+      return
+    }
+    syncScanProcess.command = [root.pythonBin, root.collectorScriptPath, "--sync-scan", root.syncEffectiveDir]
     syncScanProcess.running = true
   }
 
@@ -464,47 +802,6 @@ Item {
     if (value === "") value = safeDeviceId(rawDeviceId) + ".json"
     if (!/\.json$/i.test(value)) value += ".json"
     return value.length > 100 ? value.substring(0, 95) + ".json" : value
-  }
-
-  function parseSyncScanOutput(output) {
-    var lines = String(output || "").split("\n")
-    var snapshots = []
-    var currentPath = ""
-    var currentJson = []
-
-    function flush() {
-      if (currentPath === "") return
-      var raw = currentJson.join("\n").trim()
-      try {
-        var parsed = JSON.parse(raw)
-        if (parsed && parsed.providers) snapshots.push(parsed)
-      } catch (e) {
-        console.warn("agents/sync", "Ignoring bad snapshot", currentPath, e)
-      }
-      currentPath = ""
-      currentJson = []
-    }
-
-    for (var i = 0; i < lines.length; i++) {
-      var line = lines[i]
-      var start = line.match(/^===(.+)===$/)
-      if (start && line !== "=== EOM ===") {
-        flush()
-        currentPath = start[1]
-        currentJson = []
-        continue
-      }
-      if (line === "=== EOM ===") {
-        flush()
-        continue
-      }
-      if (currentPath !== "") currentJson.push(line)
-    }
-    flush()
-
-    aggregateData = aggregateSnapshots(snapshots)
-    syncStatusText = ""
-    syncRevision++
   }
 
   function cloneValue(value, fallback) {
